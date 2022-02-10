@@ -1,0 +1,22 @@
+[package]
+name = "SHITTYSYNC"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+swinsiandb = {path = "../swinsiandb"}
+bluos-api-rs = {path = "../bluos-api-rs"}
+tokio = { version = "1.16.1", features = ["full"] }
+clap = { version = "3.0.13", features = ["derive"] }
+anyhow = "1.0.53"
+serde = { version = "1.0.136", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.5.8"
+thiserror = "1.0.30"
+reqwest = "0.11.9"
+filenamify = "0.1.0"
+zeroconf = "0.10.2"
+log = "0.4.14"
+pretty_env_logger = "0.4.0"

@@ -1,0 +1,19 @@
+basepath = "/path/to/your/music"
+
+[swinsian]
+    dbpath = "/Users/YOURUSER/Library/Application Support/Swinsian/Library.sqlite"
+
+[decksync]
+    destination = "NAS_IP:/media/Solo/"
+    playlists = [
+        "GOOD PLAYLIST 1",
+        "GOOD PLAYLIST 2"
+    ]
+
+[evermusic]
+    servicename = "evermusic.webdav"
+    mountpath = "/tmp/somewhere"
+    playlists = [
+        "Interesting",
+        "Other playlist"
+    ]
