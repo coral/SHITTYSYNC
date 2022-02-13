@@ -18,17 +18,13 @@ pub struct Evermusic<'a> {
 
 impl<'a> Evermusic<'a> {
     pub async fn new(name: &str, mountpath: &'a str) -> Result<Evermusic<'a>, Error> {
-        let phone = match PhoneDiscovery::discover_phone(
-            "evermusic.webdav",
-            std::time::Duration::from_secs(5),
-        )
-        .await
-        {
-            Ok(v) => v,
-            Err(_) => {
-                return Err(Error::CouldNotFindPhone);
-            }
-        };
+        let phone =
+            match PhoneDiscovery::discover_phone(name, std::time::Duration::from_secs(5)).await {
+                Ok(v) => v,
+                Err(_) => {
+                    return Err(Error::CouldNotFindPhone);
+                }
+            };
 
         mkdirp(mountpath)?;
 
