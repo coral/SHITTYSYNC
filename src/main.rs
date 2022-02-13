@@ -63,7 +63,7 @@ async fn main() -> Result<()> {
 
             // playlist
             let new_pl = m3u::create_m3u(playlist, &files).await?;
-            let r = rsync::Rsync::new(&new_pl, &cfg.decksync.destination)
+            rsync::Rsync::new(&new_pl, &cfg.decksync.destination)
                 .sync_file()
                 .await?;
         }
