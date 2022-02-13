@@ -50,7 +50,7 @@ impl Rsync {
 
     pub async fn sync_file(&self) -> Result<Output, Error> {
         let mut cmd = Command::new("rsync");
-        cmd.args(["--ignore-existing", "-r", "-v", &self.source, &self.dest]);
+        cmd.args(["-r", "-v", &self.source, &self.dest]);
 
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());

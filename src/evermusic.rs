@@ -127,7 +127,8 @@ impl PhoneDiscovery {
         tokio::spawn(async move {
             while let Some(i) = c.recv().await {
                 if i.name == hname {
-                    tx.send(i);
+                    let _ = tx.send(i);
+
                     return;
                 }
             }
