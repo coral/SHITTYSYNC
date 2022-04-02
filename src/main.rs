@@ -80,12 +80,16 @@ async fn main() -> Result<()> {
     ///////////////////////
 
     if args.phone {
+        use std::collections::HashSet;
+
         info!("Discovering evermusic");
-        let e = Evermusic::new(&cfg.evermusic.servicename, &cfg.evermusic.mountpath).await?;
+        let e = Evermusic::new(&cfg.evermusic.servicename, &cfg.evermusic.mountpath, None).await?;
         info!(
             "Found Evermusic Webdav at {}:{}",
             &e.phone.hostname, &e.phone.port
         );
+
+        let mut tosync: HashSet<String> = HashSet::new();
 
         for playlist in &cfg.evermusic.playlists {
             info!("Syncing: {}", playlist);
@@ -96,9 +100,15 @@ async fn main() -> Result<()> {
                 .map(|t| t.path.replace(&cfg.basepath, ""))
                 .collect();
 
+            for f in files {
+                tosync.insert(f);
+            }
+
             let rs = rsync::Rsync::new(&cfg.basepath, &format!("{}/", cfg.evermusic.mountpath));
-            rs.sync_selective(&files).await?;
+            rs.sync_selective(&tosync).await?;
         }
+
+        dbg!(tosync);
     }
 
     Ok(())

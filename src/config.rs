@@ -19,6 +19,7 @@ pub struct Config {
     pub swinsian: SwinsianConfig,
     pub decksync: DeckSync,
     pub evermusic: Evermusic,
+    pub watch: Watch,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -40,4 +41,9 @@ pub struct Evermusic {
     pub servicename: String,
     pub mountpath: String,
     pub playlists: Vec<String>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Watch {
+    pub workspace: String,
 }

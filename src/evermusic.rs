@@ -17,14 +17,23 @@ pub struct Evermusic<'a> {
 }
 
 impl<'a> Evermusic<'a> {
-    pub async fn new(name: &str, mountpath: &'a str) -> Result<Evermusic<'a>, Error> {
-        let phone =
-            match PhoneDiscovery::discover_phone(name, std::time::Duration::from_secs(5)).await {
-                Ok(v) => v,
-                Err(_) => {
-                    return Err(Error::CouldNotFindPhone);
-                }
-            };
+    pub async fn new(
+        name: &str,
+        mountpath: &'a str,
+        timeout: Option<std::time::Duration>,
+    ) -> Result<Evermusic<'a>, Error> {
+        //set default timeout to 10 if not supplied
+        let timeout = match timeout {
+            Some(v) => v,
+            None => std::time::Duration::from_secs(10),
+        };
+
+        let phone = match PhoneDiscovery::discover_phone(name, timeout).await {
+            Ok(v) => v,
+            Err(_) => {
+                return Err(Error::CouldNotFindPhone);
+            }
+        };
 
         mkdirp(mountpath)?;
 

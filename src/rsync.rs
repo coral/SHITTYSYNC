@@ -16,16 +16,34 @@ impl Rsync {
         }
     }
 
-    pub async fn sync_selective(&self, files: &Vec<String>) -> Result<Output, Error> {
+    pub async fn sync_selective(
+        &self,
+        files: &Vec<String>,
+        delete_existing: bool,
+    ) -> Result<Output, Error> {
         let mut cmd = Command::new("rsync");
-        cmd.args([
-            "--ignore-existing",
-            "-r",
-            "-v",
-            "--files-from=-",
-            &self.source,
-            &self.dest,
-        ]);
+
+        //jeez this is ugly
+        if !delete_existing {
+            cmd.args([
+                "--ignore-existing",
+                "-r",
+                "-v",
+                "--files-from=-",
+                &self.source,
+                &self.dest,
+            ]);
+        } else {
+            cmd.args([
+                "--ignore-existing",
+                "-r",
+                "-v",
+                "--delete",
+                "--files-from=-",
+                &self.source,
+                &self.dest,
+            ]);
+        }
 
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
