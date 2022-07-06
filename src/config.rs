@@ -18,6 +18,7 @@ pub struct Config {
     pub basepath: String,
     pub swinsian: SwinsianConfig,
     pub decksync: DeckSync,
+    pub disksync: DiskSync,
     pub evermusic: Evermusic,
     pub watch: Watch,
 }
@@ -32,6 +33,14 @@ pub struct SwinsianConfig {
 #[serde(rename_all = "camelCase")]
 pub struct DeckSync {
     pub destination: String,
+    pub playlists: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiskSync {
+    pub destination: String,
+    pub playlistfolder: String,
     pub playlists: Vec<String>,
 }
 

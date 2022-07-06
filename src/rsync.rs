@@ -23,30 +23,36 @@ impl Rsync {
     ) -> Result<Output, Error> {
         let mut cmd = Command::new("rsync");
 
+        dbg!(&files);
+
         //jeez this is ugly
         if !delete_existing {
             cmd.args([
                 "--ignore-existing",
                 "-r",
                 "-v",
+                "-p",
                 "--files-from=-",
                 &self.source,
                 &self.dest,
             ]);
         } else {
+            dbg!("grapevine");
             cmd.args([
                 "--ignore-existing",
                 "-r",
                 "-v",
-                "--delete",
-                "--files-from=-",
+                "-p",
+                "--include-from=-",
+                "--exclude=*",
+                "--delete-excluded",
                 &self.source,
                 &self.dest,
             ]);
         }
 
-        cmd.stdout(Stdio::piped());
-        cmd.stderr(Stdio::piped());
+        cmd.stdout(Stdio::inherit());
+        cmd.stderr(Stdio::inherit());
         cmd.stdin(Stdio::piped());
 
         let mut child = cmd.spawn()?;

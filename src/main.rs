@@ -25,6 +25,8 @@ struct Args {
     deck: bool,
     #[clap(short, long)]
     phone: bool,
+    #[clap(long)]
+    disk: bool,
 }
 
 #[tokio::main]
@@ -59,7 +61,7 @@ async fn main() -> Result<()> {
                 .collect();
 
             let rs = rsync::Rsync::new(&cfg.basepath, &cfg.decksync.destination);
-            rs.sync_selective(&files).await?;
+            rs.sync_selective(&files, false).await?;
 
             // playlist
             let new_pl = m3u::create_m3u(playlist, &files).await?;
@@ -73,6 +75,31 @@ async fn main() -> Result<()> {
         let device = Discovery::discover_one().await?;
         info!("Found BluOS device on: {}", &device.hostname);
         BluOS::new_from_discovered(device)?.update_library().await?;
+    }
+
+    ///////////////////////
+    // Disk
+    ///////////////////////
+    if args.disk {
+        for playlist in &cfg.disksync.playlists {
+            // files
+            info!("Syncing: {}", playlist);
+            let d = db.get_playlist(&playlist)?;
+            let files: Vec<String> = db
+                .get_playlist_songs(&d)?
+                .into_iter()
+                .map(|t| t.path.replace(&cfg.basepath, ""))
+                .collect();
+
+            let rs = rsync::Rsync::new(&cfg.basepath, &cfg.disksync.destination);
+            rs.sync_selective(&files, false).await?;
+
+            // playlist
+            let new_pl = m3u::create_m3u(playlist, &files).await?;
+            rsync::Rsync::new(&new_pl, &cfg.disksync.playlistfolder)
+                .sync_file()
+                .await?;
+        }
     }
 
     ///////////////////////
@@ -103,12 +130,11 @@ async fn main() -> Result<()> {
             for f in files {
                 tosync.insert(f);
             }
-
-            let rs = rsync::Rsync::new(&cfg.basepath, &format!("{}/", cfg.evermusic.mountpath));
-            rs.sync_selective(&tosync).await?;
         }
 
-        dbg!(tosync);
+        let rs = rsync::Rsync::new(&cfg.basepath, &format!("{}/", cfg.evermusic.mountpath));
+        rs.sync_selective(&tosync.into_iter().collect(), false)
+            .await?;
     }
 
     Ok(())
