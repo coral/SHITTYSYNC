@@ -88,7 +88,7 @@ async fn main() -> Result<()> {
             let files: Vec<String> = db
                 .get_playlist_songs(&d)?
                 .into_iter()
-                .map(|t| t.path.replace(&cfg.basepath, ""))
+                .map(|t| t.path.replace(&cfg.basepath, "../"))
                 .collect();
 
             let rs = rsync::Rsync::new(&cfg.basepath, &cfg.disksync.destination);
