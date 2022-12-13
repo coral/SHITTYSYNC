@@ -55,4 +55,6 @@ pub struct Evermusic {
 #[serde(rename_all = "camelCase")]
 pub struct Watch {
     pub workspace: String,
+    pub device_name: String,
+    pub playlists: Vec<String>,
 }

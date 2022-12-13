@@ -3,12 +3,16 @@ mod error;
 mod evermusic;
 mod m3u;
 mod rsync;
+mod transcode;
+mod watch;
 
 use anyhow::Result;
 use bluos_api_rs::{BluOS, Discovery};
 use clap::Parser;
 use config::Config;
 use evermusic::Evermusic;
+use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use std::collections::HashSet;
 use std::path::Path;
 use swinsiandb::Database;
 
@@ -27,6 +31,8 @@ struct Args {
     phone: bool,
     #[clap(long)]
     disk: bool,
+    #[clap(long, short)]
+    watch: bool,
 }
 
 #[tokio::main]
@@ -107,8 +113,6 @@ async fn main() -> Result<()> {
     ///////////////////////
 
     if args.phone {
-        use std::collections::HashSet;
-
         info!("Discovering evermusic");
         let e = Evermusic::new(&cfg.evermusic.servicename, &cfg.evermusic.mountpath, None).await?;
         info!(
@@ -135,6 +139,32 @@ async fn main() -> Result<()> {
         let rs = rsync::Rsync::new(&cfg.basepath, &format!("{}/", cfg.evermusic.mountpath));
         rs.sync_selective(&tosync.into_iter().collect(), false)
             .await?;
+    }
+
+    if args.watch {
+        info!("WATCH TIME: finding watch");
+        let w = watch::Watch::new(cfg.watch.clone()).await?;
+        let trs = transcode::Transcoder::new(cfg.watch.workspace.clone());
+
+        let mut tosync: HashSet<String> = HashSet::new();
+
+        for playlist in &cfg.watch.playlists {
+            info!("Preparing '{}' for syncing", playlist);
+            let d = db.get_playlist(&playlist)?;
+            let files: Vec<String> = db
+                .get_playlist_songs(&d)?
+                .into_iter()
+                .map(|t| t.path)
+                .collect();
+
+            for f in files {
+                tosync.insert(f);
+            }
+        }
+
+        tosync.into_par_iter().for_each(|d| {
+            trs.transcode(d);
+        })
     }
 
     Ok(())

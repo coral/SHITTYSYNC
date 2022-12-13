@@ -14,6 +14,9 @@ pub enum Error {
     #[error(transparent)]
     RequestError(#[from] reqwest::Error),
 
+    #[error(transparent)]
+    MTPError(#[from] libmtp_rs::error::Error),
+
     #[error("Stdin Errr")]
     CouldNotGetStdin,
 
@@ -22,6 +25,15 @@ pub enum Error {
 
     #[error("could not find phone")]
     CouldNotFindPhone,
+
+    #[error("could not find Watch")]
+    CouldNotFindWatch,
+
+    #[error("transcoder: could not generate output filename for `{0}`")]
+    TranscodeCouldNotGenerateOutputFilename(String),
+
+    #[error("ffmpeg error")]
+    FFMpegError,
 
     #[error("other")]
     Other,

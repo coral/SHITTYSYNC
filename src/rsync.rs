@@ -31,7 +31,6 @@ impl Rsync {
                 "--ignore-existing",
                 "-r",
                 "-v",
-                "-p",
                 "--files-from=-",
                 &self.source,
                 &self.dest,
