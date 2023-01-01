@@ -13,7 +13,7 @@ use config::Config;
 use evermusic::Evermusic;
 use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use swinsiandb::Database;
 
 use pretty_env_logger;
@@ -143,10 +143,13 @@ async fn main() -> Result<()> {
 
     if args.watch {
         info!("WATCH TIME: finding watch");
-        let w = watch::Watch::new(cfg.watch.clone()).await?;
-        let trs = transcode::Transcoder::new(cfg.watch.workspace.clone());
+        let mut w = watch::Watch::new(cfg.watch.clone()).await?;
+        let trs = transcode::Transcoder::new("/tmp".to_string());
 
+        // Generate list of files to be synced
         let mut tosync: HashSet<String> = HashSet::new();
+
+        let bp = Path::new(&cfg.basepath);
 
         for playlist in &cfg.watch.playlists {
             info!("Preparing '{}' for syncing", playlist);
@@ -162,9 +165,40 @@ async fn main() -> Result<()> {
             }
         }
 
-        tosync.into_par_iter().for_each(|d| {
-            trs.transcode(d);
-        })
+        // Diff against files on device
+        let mut to_transcode: HashSet<PathBuf> = HashSet::new();
+        for f in tosync.iter() {
+            let p = Path::new(f);
+            let mut d = pathdiff::diff_paths(p, bp).unwrap();
+            d.set_extension("aac");
+            if !w.exists(d.as_path()) {
+                to_transcode.insert(p.to_path_buf());
+            }
+        }
+
+        let transcoded_files: Vec<watch::TransferObject> = to_transcode
+            .into_par_iter()
+            .map(|d| {
+                let src = d.clone();
+
+                let transcoded_file = trs
+                    .transcode(d.into_os_string().into_string().unwrap())
+                    .unwrap();
+
+                let mut dst = pathdiff::diff_paths(src.as_path(), bp).unwrap();
+                dst.set_extension("aac");
+
+                watch::TransferObject {
+                    source: src.clone(),
+                    transcoded: Path::new("/tmp").join(transcoded_file).to_path_buf(),
+                    destination: dst,
+                }
+            })
+            .collect();
+
+        for f in transcoded_files {
+            w.put_file(f)?;
+        }
     }
 
     Ok(())

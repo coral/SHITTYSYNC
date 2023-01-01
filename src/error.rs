@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -34,6 +36,15 @@ pub enum Error {
 
     #[error("ffmpeg error")]
     FFMpegError,
+
+    #[error("watch storage error")]
+    NoWatchStorge,
+
+    #[error("file already exists on device: `{0}`")]
+    FileAlreadyExists(PathBuf),
+
+    #[error("could not find folder: `{0}`")]
+    CouldNotFindFolder(String),
 
     #[error("other")]
     Other,

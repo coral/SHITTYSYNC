@@ -56,5 +56,6 @@ pub struct Evermusic {
 pub struct Watch {
     pub workspace: String,
     pub device_name: String,
+    pub base_folder: String,
     pub playlists: Vec<String>,
 }
