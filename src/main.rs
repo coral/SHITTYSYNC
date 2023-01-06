@@ -11,7 +11,7 @@ use bluos_api_rs::{BluOS, Discovery};
 use clap::Parser;
 use config::Config;
 use evermusic::Evermusic;
-use rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use swinsiandb::Database;
@@ -170,11 +170,13 @@ async fn main() -> Result<()> {
         for f in tosync.iter() {
             let p = Path::new(f);
             let mut d = pathdiff::diff_paths(p, bp).unwrap();
-            d.set_extension("aac");
+            d.set_extension("mp4");
             if !w.exists(d.as_path()) {
                 to_transcode.insert(p.to_path_buf());
             }
         }
+
+        info!("Transcoding {} files", to_transcode.len());
 
         let transcoded_files: Vec<watch::TransferObject> = to_transcode
             .into_par_iter()
@@ -186,7 +188,7 @@ async fn main() -> Result<()> {
                     .unwrap();
 
                 let mut dst = pathdiff::diff_paths(src.as_path(), bp).unwrap();
-                dst.set_extension("aac");
+                dst.set_extension("mp4");
 
                 watch::TransferObject {
                     source: src.clone(),
@@ -196,7 +198,11 @@ async fn main() -> Result<()> {
             })
             .collect();
 
+        info!("uploading {:?}", &transcoded_files);
+
         for f in transcoded_files {
+            info!("Syncing file: {:?}", f);
+            println!("");
             w.put_file(f)?;
         }
     }

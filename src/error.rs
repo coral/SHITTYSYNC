@@ -40,9 +40,6 @@ pub enum Error {
     #[error("watch storage error")]
     NoWatchStorge,
 
-    #[error("file already exists on device: `{0}`")]
-    FileAlreadyExists(PathBuf),
-
     #[error("could not find folder: `{0}`")]
     CouldNotFindFolder(String),
 

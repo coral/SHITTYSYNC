@@ -5,8 +5,8 @@ use libmtp_rs::device::MtpDevice;
 use libmtp_rs::device::StorageSort;
 use libmtp_rs::object::filetypes::Filetype;
 use libmtp_rs::object::AsObjectId;
-use libmtp_rs::storage::Parent;
-use libmtp_rs::storage::Storage;
+use libmtp_rs::storage::{files::FileMetadata, Parent, Storage};
+use sha3::{Digest, Sha3_256};
 use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ pub struct Watch {
     device: MtpDevice,
 
     index: Option<Vec<WFile>>,
-    map: Option<HashSet<PathBuf>>,
+    map: Option<HashSet<String>>,
     music_folder: Option<Parent>,
 }
 
@@ -113,51 +113,80 @@ impl<'a> Watch {
 
         let index = WFile::fr(storage, self.music_folder.unwrap());
 
-        let mut map: HashSet<PathBuf> = HashSet::new();
+        let map: HashSet<String> = HashSet::new();
+        self.map = Some(map);
 
         for n in index.iter() {
             let p = PathBuf::new();
             for res in n.resolve_recursive(p.clone()) {
-                map.insert(res);
+                self.insert_hash(&res.as_path());
             }
         }
 
         self.index = Some(index);
 
-        self.map = Some(map);
-
         Ok(())
     }
 
+    fn insert_hash(&mut self, p: &Path) {
+        self.map.as_mut().unwrap().insert(
+            p.with_extension("")
+                .as_os_str()
+                .to_str()
+                .unwrap()
+                .to_string(),
+        );
+    }
+
     pub fn exists(&self, p: &Path) -> bool {
+        let mut hash = Sha3_256::new();
+
+        hash.update(p.with_extension("").as_os_str().to_str().unwrap());
+        let hash = format!("{:x}", hash.finalize());
+
         match &self.map {
-            Some(m) => m.contains(&p.to_path_buf()),
+            Some(m) => m.contains(&hash),
             None => false,
         }
     }
 
     pub fn put_file(&mut self, t: TransferObject) -> Result<(), Error> {
+        use libmtp_rs::util::CallbackReturn;
+        use std::io::Write;
+
         let storage_pool = self.device.storage_pool();
         let (_, storage) = storage_pool.iter().next().ok_or(Error::NoWatchStorge)?;
 
-        //storage.sen
+        let file = std::fs::File::open(t.transcoded.clone())?;
+        let metadata = file.metadata()?;
 
-        // let root_contents = storage.files_and_folders(Parent::Root);
+        let mut hash = Sha3_256::new();
 
-        //let music_folder_id = Self::find_folder(storage, "Music")?;
+        hash.update(
+            t.destination
+                .with_extension("")
+                .as_os_str()
+                .to_str()
+                .unwrap(),
+        );
+        let hash = format!("{:x}", hash.finalize());
+        let p = format!("{}.mp4", hash);
 
-        // let f = storage
-        //     .files_and_folders(Parent::Root)
-        //     .iter()
-        //     .find(|f| f.name() == "Music")
-        //     .ok_or(Error::CouldNotFindFolder("Music".to_string()))?;
+        let metadata = FileMetadata {
+            file_size: metadata.len(),
+            file_name: &p,
+            file_type: Filetype::Text,
+            modification_date: metadata.modified()?.into(),
+        };
+        let f = self.music_folder.unwrap();
 
-        //let p = Path::new("Basse/Ölandstek.mp3");
-        //dbg!(self.exists(p));
-
-        //Self::find_file_in_folder(storage, music_folder_id, p);
-
-        //       dbg!(music_folder_id);
+        println!("sending {}", metadata.file_name);
+        storage.send_file_from_path_with_callback(t.transcoded, f, metadata, |sent, total| {
+            print!("\rProgress {}/{}", sent, total);
+            std::io::stdout().lock().flush().expect("Failed to flush");
+            CallbackReturn::Continue
+        })?;
+        println!("");
 
         Ok(())
     }
@@ -169,31 +198,5 @@ impl<'a> Watch {
             .find(|f| f.name() == key && f.ftype() == Filetype::Folder)
             .map(|n| n.as_id())
             .ok_or(Error::CouldNotFindFolder(key.to_string()))
-    }
-
-    fn find_file_in_folder(storage: &Storage, folder: u32, path: &Path) {
-        let mut cf = folder;
-
-        //storage.get_file_to_path(file, path);
-
-        // for c in path.components() {
-        //     match storage
-        //         .files_and_folders(Parent::Folder(cf))
-        //         .into_iter()
-        //         .find(|f| {
-        //             if f.name() == c.as_os_str().to_str().unwrap() {
-        //                 true
-        //             } else {
-        //                 false
-        //             }
-        //         }) {
-        //         Some(v) => {
-        //             v.
-        //         }
-        //         None => todo!(),
-        //     }
-        // }
-        let files = storage.files_and_folders(Parent::Folder(folder));
-        dbg!(files);
     }
 }
