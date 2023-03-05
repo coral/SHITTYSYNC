@@ -81,7 +81,10 @@ impl<'a> Watch {
             .into_iter()
             .find(|d| match d {
                 Some(v) => match v.get_friendly_name() {
-                    Ok(v) => v == cfg.device_name,
+                    Ok(v) => {
+                        println!("Found device {}", v);
+                        v == cfg.device_name
+                    }
                     Err(_) => false,
                 },
                 None => false,
