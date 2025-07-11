@@ -207,5 +207,7 @@ async fn main() -> Result<()> {
         }
     }
 
+    println!("------------- DONE -------------");
+
     Ok(())
 }

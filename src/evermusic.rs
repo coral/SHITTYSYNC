@@ -37,7 +37,7 @@ impl<'a> Evermusic<'a> {
 
         mkdirp(mountpath)?;
 
-        tokio::process::Command::new("mount_webdav")
+        let o = tokio::process::Command::new("mount_webdav")
             .arg(format!("http://{}:{}/", phone.hostname, phone.port))
             .arg(mountpath)
             .output()
@@ -89,15 +89,15 @@ impl PhoneDiscovery {
         self.cancel = Some(ctx);
 
         tokio::task::spawn_blocking(move || {
-            let mut browser = MdnsBrowser::new(ServiceType::new("http", "tcp").unwrap());
+            let mut browser = MdnsBrowser::new(ServiceType::new("webdav", "tcp").unwrap());
 
             browser.set_service_discovered_callback(Box::new(
                 move |result: zeroconf::Result<ServiceDiscovery>,
                       _context: Option<Arc<dyn Any>>| {
                     let res = result.unwrap();
-                    let _ = tx.blocking_send(DiscoveredPhone {
+                    _ = tx.blocking_send(DiscoveredPhone {
                         name: res.name().clone(),
-                        hostname: res.address().clone(),
+                        hostname: res.host_name().clone(),
                         port: *res.port(),
                     });
                 },
