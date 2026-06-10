@@ -3,44 +3,41 @@ use thiserror::Error;
 #[derive(Error, Debug)]
 pub enum Error {
     #[error(transparent)]
-    ParseError(#[from] serde_json::Error),
+    Config(#[from] toml::de::Error),
 
     #[error(transparent)]
-    ConfigError(#[from] toml::de::Error),
+    Io(#[from] std::io::Error),
 
     #[error(transparent)]
-    ReadError(#[from] std::io::Error),
-
-    #[error(transparent)]
-    RequestError(#[from] reqwest::Error),
-
-    #[error(transparent)]
-    MTPError(#[from] libmtp_rs::error::Error),
-
-    #[error("Stdin Errr")]
-    CouldNotGetStdin,
+    Mtp(#[from] libmtp_rs::error::Error),
 
     #[error(transparent)]
     PhoneTimeout(#[from] tokio::time::error::Elapsed),
 
-    #[error("could not find phone")]
-    CouldNotFindPhone,
+    #[error("could not read child process stdin")]
+    CouldNotGetStdin,
 
-    #[error("could not find Watch")]
-    CouldNotFindWatch,
+    #[error("could not find phone `{0}` on the network")]
+    CouldNotFindPhone(String),
+
+    #[error("could not find watch `{0}`")]
+    CouldNotFindWatch(String),
+
+    #[error("failed to mount WebDAV share: {0}")]
+    Mount(String),
 
     #[error("transcoder: could not generate output filename for `{0}`")]
     TranscodeCouldNotGenerateOutputFilename(String),
 
-    #[error("ffmpeg error")]
-    FFMpegError,
+    #[error("ffmpeg failed to transcode `{0}`")]
+    FFmpeg(String),
 
-    #[error("watch storage error")]
-    NoWatchStorge,
+    #[error("watch has no usable storage")]
+    NoWatchStorage,
 
     #[error("could not find folder: `{0}`")]
     CouldNotFindFolder(String),
 
-    #[error("other")]
-    Other,
+    #[error("mDNS discovery is already running")]
+    DiscoveryAlreadyRunning,
 }

@@ -8,22 +8,19 @@ use libmtp_rs::object::AsObjectId;
 use libmtp_rs::storage::{files::FileMetadata, Parent, Storage};
 use sha3::{Digest, Sha3_256};
 use std::collections::HashSet;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub struct Watch {
     cfg: WatchConfig,
     device: MtpDevice,
 
-    index: Option<Vec<WFile>>,
+    /// Hashes of the files already present on the device.
     map: Option<HashSet<String>>,
     music_folder: Option<Parent>,
 }
 
-// i am lazy haha
 #[derive(Debug, Clone)]
 pub struct TransferObject {
-    pub source: PathBuf,
     pub transcoded: PathBuf,
     pub destination: PathBuf,
 }
@@ -38,117 +35,91 @@ pub struct WFile {
 }
 
 impl WFile {
-    pub fn fr(storage: &Storage, parent: Parent) -> Vec<WFile> {
+    /// Recursively reads the files and folders under `parent` into a tree.
+    pub fn from_storage(storage: &Storage, parent: Parent) -> Vec<WFile> {
         storage
             .files_and_folders(parent)
             .iter()
-            .map(|f| match f.ftype() {
-                Filetype::Folder => WFile {
+            .map(|f| {
+                let children = matches!(f.ftype(), Filetype::Folder)
+                    .then(|| Self::from_storage(storage, Parent::Folder(f.as_id())));
+                WFile {
                     name: f.name().to_string(),
                     id: f.as_id(),
                     ftype: f.ftype(),
-                    children: Some(Self::fr(storage, Parent::Folder(f.as_id()))),
-                },
-                _ => WFile {
-                    name: f.name().to_string(),
-                    id: f.as_id(),
-                    ftype: f.ftype(),
-                    children: None,
-                },
+                    children,
+                }
             })
             .collect()
     }
 
+    /// Flattens this node into the list of leaf (file) paths beneath `parent`.
     pub fn resolve_recursive(&self, parent: PathBuf) -> Vec<PathBuf> {
         match &self.children {
-            Some(v) => v
+            Some(children) => children
                 .iter()
-                .flat_map(|f| f.resolve_recursive(parent.join(self.name.clone())))
+                .flat_map(|f| f.resolve_recursive(parent.join(&self.name)))
                 .collect(),
-            None => {
-                vec![parent.join(self.name.clone())]
-            }
+            None => vec![parent.join(&self.name)],
         }
     }
 }
 
-impl<'a> Watch {
+impl Watch {
     pub async fn new(cfg: WatchConfig) -> Result<Watch, Error> {
         let raw_devices = detect_raw_devices()?;
-        let mtp_devices = raw_devices.into_iter().map(|raw| raw.open_uncached());
 
-        let mut device = mtp_devices
+        let mut device = raw_devices
             .into_iter()
-            .find(|d| match d {
-                Some(v) => match v.get_friendly_name() {
-                    Ok(v) => {
-                        println!("Found device {}", v);
-                        v == cfg.device_name
-                    }
-                    Err(_) => false,
-                },
-                None => false,
+            .filter_map(|raw| raw.open_uncached())
+            .find(|d| match d.get_friendly_name() {
+                Ok(name) => {
+                    println!("Found device {}", name);
+                    name == cfg.device_name
+                }
+                Err(_) => false,
             })
-            .ok_or(Error::CouldNotFindWatch)?
-            .ok_or(Error::CouldNotFindWatch)?;
+            .ok_or_else(|| Error::CouldNotFindWatch(cfg.device_name.clone()))?;
 
         device.update_storage(StorageSort::ByFreeSpace)?;
 
-        let mut w = Watch {
+        let mut watch = Watch {
             cfg,
             device,
-            index: None,
             map: None,
             music_folder: None,
         };
-        w.build_index()?;
+        watch.build_index()?;
 
-        Ok(w)
+        Ok(watch)
     }
 
     fn build_index(&mut self) -> Result<(), Error> {
         let storage_pool = self.device.storage_pool();
-        let (_, storage) = storage_pool.iter().next().ok_or(Error::NoWatchStorge)?;
+        let (_, storage) = storage_pool.iter().next().ok_or(Error::NoWatchStorage)?;
 
         let music_folder_id = Self::find_folder(storage, &self.cfg.base_folder)?;
+        let music_folder = Parent::Folder(music_folder_id);
+        self.music_folder = Some(music_folder);
 
-        self.music_folder = Some(Parent::Folder(music_folder_id));
+        let index = WFile::from_storage(storage, music_folder);
 
-        let index = WFile::fr(storage, self.music_folder.unwrap());
-
-        let map: HashSet<String> = HashSet::new();
-        self.map = Some(map);
-
-        for n in index.iter() {
-            let p = PathBuf::new();
-            for res in n.resolve_recursive(p.clone()) {
-                self.insert_hash(&res.as_path());
+        let mut map = HashSet::new();
+        for node in &index {
+            for path in node.resolve_recursive(PathBuf::new()) {
+                map.insert(strip_extension(&path));
             }
         }
-
-        self.index = Some(index);
+        self.map = Some(map);
 
         Ok(())
     }
 
-    fn insert_hash(&mut self, p: &Path) {
-        self.map.as_mut().unwrap().insert(
-            p.with_extension("")
-                .as_os_str()
-                .to_str()
-                .unwrap()
-                .to_string(),
-        );
-    }
-
+    /// Returns whether a file for `p` (matched by its content hash) already
+    /// exists on the device.
     pub fn exists(&self, p: &Path) -> bool {
-        let mut hash = Sha3_256::new();
-
-        hash.update(p.with_extension("").as_os_str().to_str().unwrap());
-        let hash = format!("{:x}", hash.finalize());
-
         match &self.map {
-            Some(m) => m.contains(&hash),
+            Some(map) => map.contains(&sha3_hex(&strip_extension(p))),
             None => false,
         }
     }
@@ -158,38 +129,33 @@ impl<'a> Watch {
         use std::io::Write;
 
         let storage_pool = self.device.storage_pool();
-        let (_, storage) = storage_pool.iter().next().ok_or(Error::NoWatchStorge)?;
+        let (_, storage) = storage_pool.iter().next().ok_or(Error::NoWatchStorage)?;
 
-        let file = std::fs::File::open(t.transcoded.clone())?;
-        let metadata = file.metadata()?;
+        let file = std::fs::File::open(&t.transcoded)?;
+        let file_metadata = file.metadata()?;
 
-        let mut hash = Sha3_256::new();
-
-        hash.update(
-            t.destination
-                .with_extension("")
-                .as_os_str()
-                .to_str()
-                .unwrap(),
-        );
-        let hash = format!("{:x}", hash.finalize());
-        let p = format!("{}.mp4", hash);
-
+        let file_name = format!("{}.mp4", sha3_hex(&strip_extension(&t.destination)));
         let metadata = FileMetadata {
-            file_size: metadata.len(),
-            file_name: &p,
+            file_size: file_metadata.len(),
+            file_name: &file_name,
             file_type: Filetype::Text,
-            modification_date: metadata.modified()?.into(),
+            modification_date: file_metadata.modified()?.into(),
         };
-        let f = self.music_folder.unwrap();
+
+        let folder = self.music_folder.ok_or(Error::NoWatchStorage)?;
 
         println!("sending {}", metadata.file_name);
-        storage.send_file_from_path_with_callback(t.transcoded, f, metadata, |sent, total| {
-            print!("\rProgress {}/{}", sent, total);
-            std::io::stdout().lock().flush().expect("Failed to flush");
-            CallbackReturn::Continue
-        })?;
-        println!("");
+        storage.send_file_from_path_with_callback(
+            &t.transcoded,
+            folder,
+            metadata,
+            |sent, total| {
+                print!("\rProgress {}/{}", sent, total);
+                std::io::stdout().lock().flush().expect("Failed to flush");
+                CallbackReturn::Continue
+            },
+        )?;
+        println!();
 
         Ok(())
     }
@@ -200,6 +166,22 @@ impl<'a> Watch {
             .iter()
             .find(|f| f.name() == key && f.ftype() == Filetype::Folder)
             .map(|n| n.as_id())
-            .ok_or(Error::CouldNotFindFolder(key.to_string()))
+            .ok_or_else(|| Error::CouldNotFindFolder(key.to_string()))
     }
+}
+
+/// Returns `path` without its extension as a lossy UTF-8 string.
+fn strip_extension(path: &Path) -> String {
+    path.with_extension("").to_string_lossy().into_owned()
+}
+
+/// Hex-encoded SHA3-256 digest of `input`.
+fn sha3_hex(input: &str) -> String {
+    let mut hasher = Sha3_256::new();
+    hasher.update(input);
+    hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect()
 }

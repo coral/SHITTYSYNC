@@ -16,27 +16,17 @@ impl Rsync {
         }
     }
 
+    /// Syncs an explicit list of files from `source` to `dest`, feeding the
+    /// file list to rsync over stdin. When `delete_existing` is set, files on
+    /// the destination that aren't in the list are removed.
     pub async fn sync_selective(
         &self,
-        files: &Vec<String>,
+        files: &[String],
         delete_existing: bool,
     ) -> Result<Output, Error> {
         let mut cmd = Command::new("rsync");
 
-        dbg!(&files);
-
-        //jeez this is ugly
-        if !delete_existing {
-            cmd.args([
-                "--ignore-existing",
-                "-r",
-                "-v",
-                "--files-from=-",
-                &self.source,
-                &self.dest,
-            ]);
-        } else {
-            dbg!("grapevine");
+        if delete_existing {
             cmd.args([
                 "--ignore-existing",
                 "-r",
@@ -48,6 +38,15 @@ impl Rsync {
                 &self.source,
                 &self.dest,
             ]);
+        } else {
+            cmd.args([
+                "--ignore-existing",
+                "-r",
+                "-v",
+                "--files-from=-",
+                &self.source,
+                &self.dest,
+            ]);
         }
 
         cmd.stdout(Stdio::inherit());
@@ -56,31 +55,22 @@ impl Rsync {
 
         let mut child = cmd.spawn()?;
 
-        let mut tn = child.stdin.take().ok_or(Error::CouldNotGetStdin)?;
+        let mut stdin = child.stdin.take().ok_or(Error::CouldNotGetStdin)?;
+        let filelist = files.join("\n");
+        stdin.write_all(filelist.as_bytes()).await?;
+        drop(stdin);
 
-        let mut filelist: String = "".to_string();
-        for f in files {
-            filelist.push_str(&format!("{}\n", f));
-        }
-        tn.write_all(filelist.as_bytes()).await?;
-
-        drop(tn);
-
-        let v = child.wait_with_output().await?;
-
-        Ok(v)
+        Ok(child.wait_with_output().await?)
     }
 
+    /// Recursively syncs `source` to `dest`.
     pub async fn sync_file(&self) -> Result<Output, Error> {
         let mut cmd = Command::new("rsync");
         cmd.args(["-r", "-v", &self.source, &self.dest]);
-
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
 
         let child = cmd.spawn()?;
-        let v = child.wait_with_output().await?;
-
-        Ok(v)
+        Ok(child.wait_with_output().await?)
     }
 }

@@ -10,10 +10,25 @@ basepath = "/path/to/your/music"
         "GOOD PLAYLIST 2"
     ]
 
+[disksync]
+    destination = "NAS_IP:/media/Solo/"
+    playlistfolder = "NAS_IP:/media/Playlists/"
+    playlists = [
+        "GOOD PLAYLIST 1"
+    ]
+
 [evermusic]
     servicename = "evermusic.webdav"
     mountpath = "/tmp/somewhere"
     playlists = [
         "Interesting",
         "Other playlist"
+    ]
+
+[watch]
+    workspace = "/tmp/watch"
+    deviceName = "My Watch"
+    baseFolder = "Music"
+    playlists = [
+        "Running"
     ]

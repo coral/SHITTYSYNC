@@ -1,37 +1,34 @@
 use crate::error::Error;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub struct Transcoder {
-    cache_folder: String,
+    cache_folder: PathBuf,
 }
 
 impl Transcoder {
-    pub fn new(cache_folder: String) -> Self {
-        Transcoder { cache_folder }
+    pub fn new(cache_folder: impl Into<PathBuf>) -> Self {
+        Transcoder {
+            cache_folder: cache_folder.into(),
+        }
     }
 
-    pub fn transcode(&self, file: String) -> Result<String, Error> {
-        let path = Path::new(&file);
+    /// Transcodes `file` to AAC in an `.mp4` container inside the cache folder,
+    /// returning the path of the transcoded file. Already-cached files are
+    /// returned without re-encoding.
+    pub fn transcode(&self, file: &Path) -> Result<PathBuf, Error> {
+        let stem = file.file_stem().ok_or_else(|| {
+            Error::TranscodeCouldNotGenerateOutputFilename(file.to_string_lossy().into_owned())
+        })?;
 
-        let mut new_file = path
-            .file_stem()
-            .ok_or(Error::TranscodeCouldNotGenerateOutputFilename(file.clone()))?
-            .to_os_string();
+        let output = self.cache_folder.join(stem).with_extension("mp4");
+        if output.exists() {
+            return Ok(output);
+        }
 
-        new_file.push(".mp4");
-
-        let new_file_path = Path::new(&self.cache_folder).join(new_file);
-
-        match new_file_path.exists() {
-            true => return Ok(new_file_path.to_string_lossy().to_string()),
-            _ => {}
-        };
-
-        let child = Command::new("ffmpeg")
+        let status = Command::new("ffmpeg")
+            .args(["-i", &file.to_string_lossy()])
             .args([
-                "-i",
-                &file,
                 "-c:a",
                 "aac",
                 "-b:a",
@@ -43,13 +40,14 @@ impl Transcoder {
                 "-map_metadata",
                 "0:s:0",
                 "-vn",
-                &new_file_path.to_str().ok_or(Error::Other)?,
             ])
+            .arg(&output)
             .status()?;
 
-        match child.success() {
-            true => Ok(new_file_path.to_string_lossy().to_string()),
-            false => Err(Error::FFMpegError),
+        if status.success() {
+            Ok(output)
+        } else {
+            Err(Error::FFmpeg(file.to_string_lossy().into_owned()))
         }
     }
 }

@@ -9,8 +9,12 @@ use tokio::sync::mpsc::{self, Receiver};
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 use zeroconf::prelude::*;
-use zeroconf::{MdnsBrowser, ServiceDiscovery, ServiceType};
+use zeroconf::{BrowserEvent, MdnsBrowser, ServiceType};
 
+const DEFAULT_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// A WebDAV share advertised by the Evermusic iOS app, mounted locally for the
+/// lifetime of this value. The mount is torn down on drop.
 pub struct Evermusic<'a> {
     pub phone: DiscoveredPhone,
     mountpath: &'a str,
@@ -20,41 +24,40 @@ impl<'a> Evermusic<'a> {
     pub async fn new(
         name: &str,
         mountpath: &'a str,
-        timeout: Option<std::time::Duration>,
+        timeout: Option<Duration>,
     ) -> Result<Evermusic<'a>, Error> {
-        //set default timeout to 10 if not supplied
-        let timeout = match timeout {
-            Some(v) => v,
-            None => std::time::Duration::from_secs(10),
-        };
+        let timeout = timeout.unwrap_or(DEFAULT_DISCOVERY_TIMEOUT);
 
-        let phone = match PhoneDiscovery::discover_phone(name, timeout).await {
-            Ok(v) => v,
-            Err(_) => {
-                return Err(Error::CouldNotFindPhone);
-            }
-        };
+        let phone = PhoneDiscovery::discover_phone(name, timeout)
+            .await
+            .map_err(|_| Error::CouldNotFindPhone(name.to_string()))?;
 
         mkdirp(mountpath)?;
 
-        let o = tokio::process::Command::new("mount_webdav")
+        let output = tokio::process::Command::new("mount_webdav")
             .arg(format!("http://{}:{}/", phone.hostname, phone.port))
             .arg(mountpath)
             .output()
             .await?;
 
-        let e = Evermusic { phone, mountpath };
+        if !output.status.success() {
+            return Err(Error::Mount(
+                String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            ));
+        }
 
-        Ok(e)
+        Ok(Evermusic { phone, mountpath })
     }
 }
 
 impl<'a> Drop for Evermusic<'a> {
     fn drop(&mut self) {
-        std::process::Command::new("umount")
+        if let Err(e) = std::process::Command::new("umount")
             .arg(self.mountpath)
             .output()
-            .expect("failed to execute process");
+        {
+            eprintln!("failed to unmount {}: {}", self.mountpath, e);
+        }
     }
 }
 
@@ -67,39 +70,36 @@ pub struct DiscoveredPhone {
 pub struct PhoneDiscovery {
     cancel: Option<std::sync::mpsc::Sender<bool>>,
 }
+
 impl PhoneDiscovery {
     pub fn new() -> PhoneDiscovery {
         PhoneDiscovery { cancel: None }
     }
-    /// Discover uses mDNS to scan the network for BluOS devices
-    /// Returns a Tokio channel that streams results as they are found
-    ///
-    /// The discovery process is cancelled on drop
+
+    /// Uses mDNS to scan the network for WebDAV devices, streaming results over
+    /// a Tokio channel as they are found. Discovery is cancelled on drop.
     pub async fn discover(&mut self) -> Result<Receiver<DiscoveredPhone>, Error> {
-        //Check if we're already doing this
         if self.cancel.is_some() {
-            return Err(Error::Other);
+            return Err(Error::DiscoveryAlreadyRunning);
         }
 
         let (tx, rx) = mpsc::channel(200);
-        let (ctx, crx): (
-            std::sync::mpsc::Sender<bool>,
-            std::sync::mpsc::Receiver<bool>,
-        ) = std::sync::mpsc::channel();
-        self.cancel = Some(ctx);
+        let (cancel_tx, cancel_rx) = std::sync::mpsc::channel::<bool>();
+        self.cancel = Some(cancel_tx);
 
         tokio::task::spawn_blocking(move || {
             let mut browser = MdnsBrowser::new(ServiceType::new("webdav", "tcp").unwrap());
 
-            browser.set_service_discovered_callback(Box::new(
-                move |result: zeroconf::Result<ServiceDiscovery>,
-                      _context: Option<Arc<dyn Any>>| {
-                    let res = result.unwrap();
-                    _ = tx.blocking_send(DiscoveredPhone {
-                        name: res.name().clone(),
-                        hostname: res.host_name().clone(),
-                        port: *res.port(),
-                    });
+            browser.set_service_callback(Box::new(
+                move |event: zeroconf::Result<BrowserEvent>,
+                      _context: Option<Arc<dyn Any + Send + Sync>>| {
+                    if let Ok(BrowserEvent::Add(res)) = event {
+                        let _ = tx.blocking_send(DiscoveredPhone {
+                            name: res.name().clone(),
+                            hostname: res.host_name().clone(),
+                            port: *res.port(),
+                        });
+                    }
                 },
             ));
 
@@ -108,55 +108,51 @@ impl PhoneDiscovery {
             loop {
                 event_loop.poll(Duration::from_millis(500)).unwrap();
 
-                match crx.try_recv() {
-                    Ok(_) => return,
-                    Err(e) => match e {
-                        std::sync::mpsc::TryRecvError::Empty => {}
-                        std::sync::mpsc::TryRecvError::Disconnected => return,
-                    },
+                match cancel_rx.try_recv() {
+                    Ok(_) | Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
                 }
             }
         });
 
         Ok(rx)
     }
-    /// Discover one is a helper function that scans the network and returns the FIRST BluOS device it finds.
-    /// This is useful if you only have one BluOS device.
+
+    /// Scans the network and returns the first device whose advertised name
+    /// matches `name`, giving up after `t`.
     pub async fn discover_phone(name: &str, t: Duration) -> Result<DiscoveredPhone, Error> {
-        let hname = name.to_string();
-        let mut d = PhoneDiscovery::new();
-        let mut c = d.discover().await?;
+        let wanted = name.to_string();
+        let mut discovery = PhoneDiscovery::new();
+        let mut found = discovery.discover().await?;
 
         let (tx, rx) = oneshot::channel();
 
         tokio::spawn(async move {
-            while let Some(i) = c.recv().await {
-                if i.name == hname {
-                    let _ = tx.send(i);
-
+            while let Some(phone) = found.recv().await {
+                info!("Found: {}", phone.name);
+                if phone.name == wanted {
+                    let _ = tx.send(phone);
                     return;
                 }
             }
         });
-        // Wrap the future with a `Timeout` set to expire in 10 milliseconds.
-        match timeout(t, rx).await? {
-            Ok(v) => return Ok(v),
-            Err(_) => return Err(Error::Other),
-        }
+
+        timeout(t, rx)
+            .await?
+            .map_err(|_| Error::CouldNotFindPhone(name.to_string()))
     }
 }
 
 impl Drop for PhoneDiscovery {
     fn drop(&mut self) {
-        match &self.cancel {
-            Some(c) => {
-                let _ = c.send(true);
-            }
-            None => {}
+        if let Some(cancel) = &self.cancel {
+            let _ = cancel.send(true);
         }
     }
 }
 
+/// Recursively creates `path` and all missing parent directories, returning the
+/// created path (or `None` if it already existed).
 pub fn mkdirp<P: AsRef<Path>>(path: P) -> io::Result<Option<PathBuf>> {
     let path = path.as_ref();
     if path == Path::new("") {
@@ -170,15 +166,12 @@ pub fn mkdirp<P: AsRef<Path>>(path: P) -> io::Result<Option<PathBuf>> {
         Err(_) if path.is_dir() => return Ok(None),
         Err(e) => return Err(e),
     }
+
     let created = match path.parent() {
         Some(p) => mkdirp(p),
-        None => {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "failed to create whole tree",
-            ))
-        }
+        None => Err(io::Error::other("failed to create whole tree")),
     };
+
     match fs::create_dir(path) {
         Ok(()) => created,
         Err(_) if path.is_dir() => created,
