@@ -10,11 +10,19 @@ basepath = "/path/to/your/music"
         "GOOD PLAYLIST 2"
     ]
 
+# Every sync target accepts `playlists` (exact names, first match wins on
+# duplicates) and/or `patterns` (globs matched against a playlist's Swinsian
+# folder path). `*` stays within one folder level, `**` recurses. The two
+# lists are combined and de-duplicated.
 [disksync]
     destination = "NAS_IP:/media/Solo/"
     playlistfolder = "NAS_IP:/media/Playlists/"
     playlists = [
         "GOOD PLAYLIST 1"
+    ]
+    patterns = [
+        "Weatherall/*",        # all playlists directly in the Weatherall folder
+        "Collections/**",      # all playlists anywhere under Collections
     ]
 
 [evermusic]

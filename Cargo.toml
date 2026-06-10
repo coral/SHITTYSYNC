@@ -22,3 +22,9 @@ pretty_env_logger = "0.5"
 rayon = "1.12"
 pathdiff = "0.2"
 sha3 = "0.12"
+glob = "0.3"
+
+# Use the local checkout of swinsiandb during development (e.g. folder-path
+# support). Remove once those changes are pushed to the git remote.
+[patch."https://github.com/coral/swinsian-db-rust.git"]
+swinsiandb = { path = "../swinsian-db-rust" }
